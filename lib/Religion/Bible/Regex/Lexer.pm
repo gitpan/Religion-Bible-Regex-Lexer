@@ -17,7 +17,7 @@ use Data::Dumper;
 use Religion::Bible::Regex::Config;
 use Religion::Bible::Regex::Reference;
 
-use version; our $VERSION = qv('0.8');
+use version; our $VERSION = '0.85';
 
 # These constants are defined in several places and probably should be moved to a common file
 # Move these to Constants.pm
@@ -31,25 +31,35 @@ use constant FALSE => 0;
 sub new {
     my ($class, $config, $regex, $versification) = @_;
     my ($self) = {};
-    $self->{'regex'} = $regex;
     $self->{'config'} = $config;
-#    $self->{'versification'} = $versification;
+    $self->{'regex'} = $regex;
+    $self->{'versification'} = $versification;
     bless $self, $class;
     return $self;
 }
 
 # Subroutines related to getting information
 sub get_regexes {
-  my $self = shift;
-  confess "regex is not defined\n" unless defined($self->{regex});
-  $self->{regex};
+    my $self = shift;
+    confess "regex is not defined\n" unless defined($self->{regex});
+    $self->{regex};
 }
 
 # Returns a reference to a Religion::Bible::Regex::Config object.
 sub get_configuration {
-  my $self = shift;
-  confess "config is not defined\n" unless defined($self->{config});
-  return $self->{config};
+    my $self = shift;
+    confess "config is not defined\n" unless defined($self->{config});
+    return $self->{config};
+}
+
+# Returns a reference to a Religion::Bible::Regex::Versification object.
+sub get_versification {
+    my $self = shift;
+    return $self->{versification};
+}
+
+sub references { 
+    shift->{reference_list};
 }
 
 sub parse {
@@ -67,38 +77,38 @@ sub parse {
 	# If there is a ';' the next reference should have a state of BOOK or CHAPTER
 	# If there is a ',' the next reference should have a state of VERSE
 	# Of course, you can change these separator values in the configuration file
-        if ($token =~ m/$r->{'cl_separateur'}/) {
-            $state = CHAPTER; next; 
-        } elsif (($token =~ m/$r->{'vl_separateur'}/)) {
-            $state = VERSE; next;
+    if ($token =~ m/$r->{'cl_separateur'}/) {
+        $state = CHAPTER; next; 
+    } elsif (($token =~ m/$r->{'vl_separateur'}/)) {
+        $state = VERSE; next;
 	} elsif (($token =~ m/$r->{'separateur'}/)) {
-            $state = $previous_reference->context;
-            if (!_non_empty($state)) {
-                $state = '';
-            }
-            next;
+        $state = $previous_reference->context;
+        if (!_non_empty($state)) {
+            $state = '';
         }
+        next;
+    }
 
-        # Initialize the reference
-        my $ref = new Religion::Bible::Regex::Reference($self->get_configuration, $self->get_regexes);     
+    # Initialize the reference
+    my $ref = new Religion::Bible::Regex::Reference($self->get_configuration, $self->get_regexes);     
 
 	# Parse the reference
-        $ref->parse($token, $state);
+    $ref->parse($token, $state);
 
 	# Combine the context of this reference with the previous reference
 	$ref = $previous_reference->combine($ref) if defined($previous_reference);
 
 	# Save the current reference as the previous reference
-        $previous_reference = $ref; 
+    $previous_reference = $ref; 
 
 	# Save the current reference's state
-        $state = $ref->state;
+    $state = $ref->state;
 
 	# This should be rethought
-        $$con = $previous_reference;
+    $$con = $previous_reference;
 
 	# Do the versification 
-        # $ref = $self->versification->decalage($ref) if defined($self->versification);
+	$ref = $self->get_versification->decalage($ref) if (defined($self->get_versification) && ref($self->get_versification) eq 'Religion::Bible::Regex::Versification');
 
 	# Push the reference onto an array
         push @result, $ref; 
@@ -119,7 +129,7 @@ sub normalize {
         my $next = $self->{reference_list}->[++($count)];        
 
         # Print the formatted reference
-        $ret .= $ref->normalize;
+        $ret .= $ref->formatted_normalize;
 
         # If no more refs then exit the loop
         last unless defined($next);
@@ -150,8 +160,8 @@ sub format {
     my $func = shift || 'normalize';
 
     {
-	no strict ;
-	return &{$func}($self);
+        no strict ;
+        return &{$func}($self);
     }
 }
 
@@ -174,33 +184,33 @@ sub bol {
     foreach my $ref (@{$self->{reference_list}}) {
         my $next = $self->{reference_list}->[++($count)];        
 
-	if (defined($ref->context_words) && !($ref->context_words =~ m/(?:@{[$self->get_regexes->{'livres_et_abbreviations'}]})/) ) {
-	    $ret .= $ref->context_words || '';
-	    $ret .= ' ' if defined($ref->s2);
-	}
+	  if (defined($ref->context_words) && !($ref->context_words =~ m/(?:@{[$self->get_regexes->{'livres_et_abbreviations'}]})/) ) {
+	      $ret .= $ref->context_words || '';
+	      $ret .= ' ' if defined($ref->s2);
+  	}
      
-        unless ($inside) {
-            $ret .= '\\\\#'; 
-            $inside = TRUE;
-        }
+    unless ($inside) {
+      $ret .= '\\\\#'; 
+      $inside = TRUE;
+    }
 	
-	my $tmp = $ref->bol($state);
-	($tmp = $tmp) =~ s/^(?:@{[$self->get_regexes->{'chapitre_mots'}]}|@{[$self->get_regexes->{'verset_mots'}]})//g;	
+     my $tmp = $ref->bol($state);
+  	($tmp = $tmp) =~ s/^(?:@{[$self->get_regexes->{'chapitre_mots'}]}|@{[$self->get_regexes->{'verset_mots'}]})//g;	
 
-	$tmp =~ s/^[\s ]*//g;
-	$tmp =~ s/[\s ]*$//g;
+	  $tmp =~ s/^[\s ]*//g;
+  	$tmp =~ s/[\s ]*$//g;
 
-	$ret .= $tmp;
+  	$ret .= $tmp;
 
-        if (!defined($next)) {
-            $ret .= '\\\\';
+    if (!defined($next)) {
+      $ret .= '\\\\';
 	    last;
-        }
+    }
 
-        # If no more refs then exit the loop
-        # last unless defined($next);
+    # If no more refs then exit the loop
+    # last unless defined($next);
 
-#        if (_non_empty($next->context_words)) {
+    # if (_non_empty($next->context_words)) {
         if (_non_empty($next->context_words) && !($next->context_words =~ m/(?:@{[$self->get_regexes->{'livres_et_abbreviations'}]})/)) {
             $ret .= '\\\\';
             $inside = FALSE;
@@ -211,13 +221,13 @@ sub bol {
 
         if (defined($next) and $state eq VERSE) {
 #           $ret .= $refconfig->get('verse_list_separateur');
-	    $ret .= ', ';
+	          $ret .= ', ';
         } elsif (defined($next) and $state eq CHAPTER) {
 #            $ret .= $refconfig->get('chapter_list_separateur');
-	    $ret .= '; ';
+             $ret .= '; ';
         } elsif (defined($next) and $state eq BOOK) {
 #            $ret .= $refconfig->get('book_list_separateur');
-	    $ret .= '; ';
+             $ret .= '; ';
         } else {
             carp "Reference has an UNKNOWN comparsion " . $ref->normalize . " and " . $next->normalize . "\n"; 
 #            $ret .= $refconfig->get('book_list_separateur');
@@ -266,13 +276,14 @@ This document describes Religion::Bible::Regex::Lexer version 0.0.1
 
 =head2 	get_configuration
 =head2 	get_regexes
+=head2  get_versification
 =head2 	new
 =head2 	parse
 =head2  normalize
 =head2 	bol
 =head2 	bol_test
 =head2 	format
-
+=head2  references
 
 =head1 DIAGNOSTICS
 
